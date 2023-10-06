@@ -515,6 +515,12 @@ struct mi_heap_s {
 };
 
 
+struct mi_global_s {
+  mi_heap_t * _mi_heap_default;
+  mi_heap_t * _mi_heap_main;
+  mi_tld_t  * tld_main;
+}
+
 
 // ------------------------------------------------------
 // Debug

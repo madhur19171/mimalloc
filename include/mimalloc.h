@@ -187,6 +187,9 @@ mi_decl_nodiscard mi_decl_export void* mi_realloc_aligned_at(void* p, size_t new
 struct mi_heap_s;
 typedef struct mi_heap_s mi_heap_t;
 
+struct mi_global_s;
+typedef struct mi_global_s mi_global_t;
+
 mi_decl_nodiscard mi_decl_export mi_heap_t* mi_heap_new(void);
 mi_decl_export void       mi_heap_delete(mi_heap_t* heap);
 mi_decl_export void       mi_heap_destroy(mi_heap_t* heap);
