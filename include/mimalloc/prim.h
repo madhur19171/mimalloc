@@ -126,7 +126,7 @@ void _mi_prim_thread_associate_default_heap(mi_heap_t* heap);
 //-------------------------------------------------------------------
 
 // defined in `init.c`; do not use these directly
-extern mi_decl_thread mi_heap_t* _mi_heap_default;  // default heap to allocate from
+// extern mi_decl_thread mi_heap_t* _mi_heap_default;  // default heap to allocate from
 extern bool _mi_process_is_initialized;             // has mi_process_init been called?
 
 static inline mi_threadid_t _mi_prim_thread_id(void) mi_attr_noexcept;
@@ -313,7 +313,7 @@ static inline mi_heap_t* mi_prim_get_default_heap(void) {
   #if defined(MI_TLS_RECURSE_GUARD)
   if (mi_unlikely(!_mi_process_is_initialized)) return _mi_heap_main_get();
   #endif
-  return _mi_heap_default;
+  return mi_global._mi_heap_default;
 }
 
 #endif  // mi_prim_get_default_heap()

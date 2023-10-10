@@ -76,7 +76,8 @@ uintptr_t  _mi_os_random_weak(uintptr_t extra_seed);
 static inline uintptr_t _mi_random_shuffle(uintptr_t x);
 
 // init.c
-extern mi_decl_cache_align mi_stats_t       _mi_stats_main;
+// extern mi_decl_cache_align mi_stats_t       _mi_stats_main;
+extern mi_global_t mi_global; 
 extern mi_decl_cache_align const mi_page_t  _mi_page_empty;
 bool       _mi_is_main_thread(void);
 size_t     _mi_current_thread_count(void);
@@ -387,9 +388,9 @@ static inline bool mi_heap_is_initialized(mi_heap_t* heap) {
 }
 
 static inline uintptr_t _mi_ptr_cookie(const void* p) {
-  extern mi_heap_t _mi_heap_main;
-  mi_assert_internal(_mi_heap_main.cookie != 0);
-  return ((uintptr_t)p ^ _mi_heap_main.cookie);
+  // extern mi_heap_t _mi_heap_main;
+  mi_assert_internal(mi_global._mi_heap_main->cookie != 0);
+  return ((uintptr_t)p ^ mi_global._mi_heap_main->cookie);
 }
 
 /* -----------------------------------------------------------

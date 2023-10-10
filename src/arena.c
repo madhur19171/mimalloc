@@ -686,12 +686,12 @@ static void mi_arenas_unsafe_destroy(void) {
     if (arena != NULL) {
       if (arena->start != NULL && mi_memkind_is_os(arena->memid.memkind)) {      
         mi_atomic_store_ptr_release(mi_arena_t, &mi_arenas[i], NULL);
-        _mi_os_free(arena->start, mi_arena_size(arena), arena->memid, &_mi_stats_main); 
+        _mi_os_free(arena->start, mi_arena_size(arena), arena->memid, mi_global._mi_stats_main); 
       }
       else {
         new_max_arena = i;
       }
-      mi_arena_meta_free(arena, arena->meta_memid, arena->meta_size, &_mi_stats_main);
+      mi_arena_meta_free(arena, arena->meta_memid, arena->meta_size, mi_global._mi_stats_main);
     }
   }
 
@@ -760,7 +760,7 @@ static bool mi_manage_os_memory_ex2(void* start, size_t size, bool is_large, int
   const size_t bitmaps = (memid.is_pinned ? 2 : 4);
   const size_t asize  = sizeof(mi_arena_t) + (bitmaps*fields*sizeof(mi_bitmap_field_t));
   mi_memid_t meta_memid;
-  mi_arena_t* arena   = (mi_arena_t*)mi_arena_meta_zalloc(asize, &meta_memid, &_mi_stats_main); // TODO: can we avoid allocating from the OS?
+  mi_arena_t* arena   = (mi_arena_t*)mi_arena_meta_zalloc(asize, &meta_memid, mi_global._mi_stats_main); // TODO: can we avoid allocating from the OS?
   if (arena == NULL) return false;
   
   // already zero'd due to os_alloc
@@ -810,11 +810,11 @@ int mi_reserve_os_memory_ex(size_t size, bool commit, bool allow_large, bool exc
   if (arena_id != NULL) *arena_id = _mi_arena_id_none();
   size = _mi_align_up(size, MI_ARENA_BLOCK_SIZE); // at least one block
   mi_memid_t memid;
-  void* start = _mi_os_alloc_aligned(size, MI_SEGMENT_ALIGN, commit, allow_large, &memid, &_mi_stats_main);
+  void* start = _mi_os_alloc_aligned(size, MI_SEGMENT_ALIGN, commit, allow_large, &memid, mi_global._mi_stats_main);
   if (start == NULL) return ENOMEM;
   const bool is_large = memid.is_pinned; // todo: use separate is_large field?
   if (!mi_manage_os_memory_ex2(start, size, is_large, -1 /* numa node */, exclusive, memid, arena_id)) {
-    _mi_os_free_ex(start, size, commit, memid, &_mi_stats_main);
+    _mi_os_free_ex(start, size, commit, memid, mi_global._mi_stats_main);
     _mi_verbose_message("failed to reserve %zu k memory\n", _mi_divide_up(size, 1024));
     return ENOMEM;
   }
@@ -887,7 +887,7 @@ int mi_reserve_huge_os_pages_at_ex(size_t pages, int numa_node, size_t timeout_m
   _mi_verbose_message("numa node %i: reserved %zu GiB huge pages (of the %zu GiB requested)\n", numa_node, pages_reserved, pages);
 
   if (!mi_manage_os_memory_ex2(p, hsize, true, numa_node, exclusive, memid, arena_id)) {
-    _mi_os_free(p, hsize, memid, &_mi_stats_main);
+    _mi_os_free(p, hsize, memid, mi_global._mi_stats_main);
     return ENOMEM;
   }
   return 0;

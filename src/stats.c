@@ -21,8 +21,8 @@ terms of the MIT license. A copy of the license can be found in the file
 ----------------------------------------------------------- */
 
 static bool mi_is_in_main(void* stat) {
-  return ((uint8_t*)stat >= (uint8_t*)&_mi_stats_main
-         && (uint8_t*)stat < ((uint8_t*)&_mi_stats_main + sizeof(mi_stats_t)));
+  return ((uint8_t*)stat >= (uint8_t*)mi_global._mi_stats_main
+         && (uint8_t*)stat < ((uint8_t*)mi_global._mi_stats_main + sizeof(mi_stats_t)));
 }
 
 static void mi_stat_update(mi_stat_count_t* stat, int64_t amount) {
@@ -377,16 +377,16 @@ static mi_stats_t* mi_stats_get_default(void) {
 }
 
 static void mi_stats_merge_from(mi_stats_t* stats) {
-  if (stats != &_mi_stats_main) {
-    mi_stats_add(&_mi_stats_main, stats);
+  if (stats != mi_global._mi_stats_main) {
+    mi_stats_add(mi_global._mi_stats_main, stats);
     memset(stats, 0, sizeof(mi_stats_t));
   }
 }
 
 void mi_stats_reset(void) mi_attr_noexcept {
   mi_stats_t* stats = mi_stats_get_default();
-  if (stats != &_mi_stats_main) { memset(stats, 0, sizeof(mi_stats_t)); }
-  memset(&_mi_stats_main, 0, sizeof(mi_stats_t));
+  if (stats != mi_global._mi_stats_main) { memset(stats, 0, sizeof(mi_stats_t)); }
+  memset(mi_global._mi_stats_main, 0, sizeof(mi_stats_t));
   if (mi_process_start == 0) { mi_process_start = _mi_clock_start(); };
 }
 
@@ -400,7 +400,7 @@ void _mi_stats_done(mi_stats_t* stats) {  // called from `mi_thread_done`
 
 void mi_stats_print_out(mi_output_fun* out, void* arg) mi_attr_noexcept {
   mi_stats_merge_from(mi_stats_get_default());
-  _mi_stats_print(&_mi_stats_main, out, arg);
+  _mi_stats_print(mi_global._mi_stats_main, out, arg);
 }
 
 void mi_stats_print(void* out) mi_attr_noexcept {
@@ -446,8 +446,8 @@ mi_decl_export void mi_process_info(size_t* elapsed_msecs, size_t* user_msecs, s
   mi_process_info_t pinfo;
   _mi_memzero_var(pinfo);
   pinfo.elapsed        = _mi_clock_end(mi_process_start);
-  pinfo.current_commit = (size_t)(mi_atomic_loadi64_relaxed((_Atomic(int64_t)*)&_mi_stats_main.committed.current));
-  pinfo.peak_commit    = (size_t)(mi_atomic_loadi64_relaxed((_Atomic(int64_t)*)&_mi_stats_main.committed.peak));
+  pinfo.current_commit = (size_t)(mi_atomic_loadi64_relaxed((_Atomic(int64_t)*)&mi_global._mi_stats_main->committed.current));
+  pinfo.peak_commit    = (size_t)(mi_atomic_loadi64_relaxed((_Atomic(int64_t)*)&mi_global._mi_stats_main->committed.peak));
   pinfo.current_rss    = pinfo.current_commit;
   pinfo.peak_rss       = pinfo.peak_commit;
   pinfo.utime          = 0;

@@ -515,12 +515,6 @@ struct mi_heap_s {
 };
 
 
-struct mi_global_s {
-  mi_heap_t * _mi_heap_default;
-  mi_heap_t * _mi_heap_main;
-  mi_tld_t  * tld_main;
-}
-
 
 // ------------------------------------------------------
 // Debug
@@ -671,6 +665,14 @@ struct mi_tld_s {
   mi_segments_tld_t   segments;      // segment tld
   mi_os_tld_t         os;            // os tld
   mi_stats_t          stats;         // statistics
+};
+
+struct mi_global_s {
+  mi_heap_t   *   _mi_heap_default;
+  mi_heap_t   *   _mi_heap_main;
+  mi_tld_t    *   tld_main;
+  mi_stats_t  *   _mi_stats_main;
+  bool            isInitialized;
 };
 
 #endif

@@ -18,10 +18,10 @@ not accidentally mix pointers from different allocators).
 #include <mimalloc.h>
 
 // Standard C allocation
-#define malloc(n)               mi_malloc(n)
-#define calloc(n,c)             mi_calloc(n,c)
-#define realloc(p,n)            mi_realloc(p,n)
-#define free(p)                 mi_free(p)
+// #define malloc(n)               mi_malloc(n)
+// #define calloc(n,c)             mi_calloc(n,c)
+// #define realloc(p,n)            mi_realloc(p,n)
+// #define free(p)                 mi_free(p)
 
 #define strdup(s)               mi_strdup(s)
 #define strndup(s,n)              mi_strndup(s,n)

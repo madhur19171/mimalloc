@@ -147,7 +147,7 @@ static void mi_os_prim_free(void* addr, size_t size, bool still_committed, mi_st
   if (err != 0) {
     _mi_warning_message("unable to free OS memory (error: %d (0x%x), size: 0x%zx bytes, address: %p)\n", err, err, size, addr);
   }
-  mi_stats_t* stats = &_mi_stats_main;
+  mi_stats_t* stats = mi_global._mi_stats_main;
   if (still_committed) { _mi_stat_decrease(&stats->committed, size); }
   _mi_stat_decrease(&stats->reserved, size);
 }
@@ -292,7 +292,7 @@ static void* mi_os_prim_alloc_aligned(size_t size, size_t alignment, bool commit
 void* _mi_os_alloc(size_t size, mi_memid_t* memid, mi_stats_t* tld_stats) {
   MI_UNUSED(tld_stats);
   *memid = _mi_memid_none();
-  mi_stats_t* stats = &_mi_stats_main;
+  mi_stats_t* stats = mi_global._mi_stats_main;
   if (size == 0) return NULL;
   size = _mi_os_good_alloc_size(size);
   bool os_is_large = false;
@@ -316,7 +316,7 @@ void* _mi_os_alloc_aligned(size_t size, size_t alignment, bool commit, bool allo
   bool os_is_large = false;
   bool os_is_zero  = false;
   void* os_base = NULL;
-  void* p = mi_os_prim_alloc_aligned(size, alignment, commit, allow_large, &os_is_large, &os_is_zero, &os_base, &_mi_stats_main /*tld->stats*/ );
+  void* p = mi_os_prim_alloc_aligned(size, alignment, commit, allow_large, &os_is_large, &os_is_zero, &os_base, mi_global._mi_stats_main /*tld->stats*/ );
   if (p != NULL) {
     *memid = _mi_memid_create_os(commit, os_is_zero, os_is_large);
     memid->mem.os.base = os_base;
@@ -390,7 +390,7 @@ static void* mi_os_page_align_area_conservative(void* addr, size_t size, size_t*
 
 bool _mi_os_commit(void* addr, size_t size, bool* is_zero, mi_stats_t* tld_stats) {
   MI_UNUSED(tld_stats);
-  mi_stats_t* stats = &_mi_stats_main;  
+  mi_stats_t* stats =mi_global._mi_stats_main;  
   if (is_zero != NULL) { *is_zero = false; }
   _mi_stat_increase(&stats->committed, size);  // use size for precise commit vs. decommit
   _mi_stat_counter_increase(&stats->commit_calls, 1);
@@ -421,7 +421,7 @@ bool _mi_os_commit(void* addr, size_t size, bool* is_zero, mi_stats_t* tld_stats
 
 static bool mi_os_decommit_ex(void* addr, size_t size, bool* needs_recommit, mi_stats_t* tld_stats) {
   MI_UNUSED(tld_stats);
-  mi_stats_t* stats = &_mi_stats_main;
+  mi_stats_t* stats = mi_global._mi_stats_main;
   mi_assert_internal(needs_recommit!=NULL);
   _mi_stat_decrease(&stats->committed, size);
 
@@ -603,15 +603,15 @@ void* _mi_os_alloc_huge_os_pages(size_t pages, int numa_node, mi_msecs_t max_mse
       // no success, issue a warning and break
       if (p != NULL) {
         _mi_warning_message("could not allocate contiguous huge OS page %zu at %p\n", page, addr);
-        mi_os_prim_free(p, MI_HUGE_OS_PAGE_SIZE, true, &_mi_stats_main);
+        mi_os_prim_free(p, MI_HUGE_OS_PAGE_SIZE, true, mi_global._mi_stats_main);
       }
       break;
     }
 
     // success, record it
     page++;  // increase before timeout check (see issue #711)
-    _mi_stat_increase(&_mi_stats_main.committed, MI_HUGE_OS_PAGE_SIZE);
-    _mi_stat_increase(&_mi_stats_main.reserved, MI_HUGE_OS_PAGE_SIZE);
+    _mi_stat_increase(&mi_global._mi_stats_main->committed, MI_HUGE_OS_PAGE_SIZE);
+    _mi_stat_increase(&mi_global._mi_stats_main->reserved, MI_HUGE_OS_PAGE_SIZE);
 
     // check for timeout
     if (max_msecs > 0) {

@@ -475,7 +475,7 @@ static bool mi_segment_commit(mi_segment_t* segment, uint8_t* p, size_t size, mi
     bool is_zero = false;
     mi_commit_mask_t cmask;
     mi_commit_mask_create_intersect(&segment->commit_mask, &mask, &cmask);
-    _mi_stat_decrease(&_mi_stats_main.committed, _mi_commit_mask_committed_size(&cmask, MI_SEGMENT_SIZE)); // adjust for overlap
+    _mi_stat_decrease(&mi_global._mi_stats_main->committed, _mi_commit_mask_committed_size(&cmask, MI_SEGMENT_SIZE)); // adjust for overlap
     if (!_mi_os_commit(start, full_size, &is_zero, stats)) return false;
     mi_commit_mask_set(&segment->commit_mask, &mask);
   }
@@ -517,7 +517,7 @@ static bool mi_segment_purge(mi_segment_t* segment, uint8_t* p, size_t size, mi_
     if (decommitted) {
       mi_commit_mask_t cmask;
       mi_commit_mask_create_intersect(&segment->commit_mask, &mask, &cmask);
-      _mi_stat_increase(&_mi_stats_main.committed, full_size - _mi_commit_mask_committed_size(&cmask, MI_SEGMENT_SIZE)); // adjust for double counting 
+      _mi_stat_increase(&mi_global._mi_stats_main->committed, full_size - _mi_commit_mask_committed_size(&cmask, MI_SEGMENT_SIZE)); // adjust for double counting 
       mi_commit_mask_clear(&segment->commit_mask, &mask);
     }        
   }
@@ -1535,7 +1535,7 @@ static mi_page_t* mi_segment_huge_page_alloc(size_t size, size_t page_alignment,
     mi_assert_internal(psize - (aligned_p - start) >= size);      
     uint8_t* decommit_start = start + sizeof(mi_block_t);              // for the free list
     ptrdiff_t decommit_size = aligned_p - decommit_start;
-    _mi_os_reset(decommit_start, decommit_size, &_mi_stats_main);   // note: cannot use segment_decommit on huge segments    
+    _mi_os_reset(decommit_start, decommit_size, mi_global._mi_stats_main);   // note: cannot use segment_decommit on huge segments    
   }
   
   return page;
@@ -1582,7 +1582,7 @@ void _mi_segment_huge_page_reset(mi_segment_t* segment, mi_page_t* page, mi_bloc
     if (csize > sizeof(mi_block_t)) {
       csize = csize - sizeof(mi_block_t);
       uint8_t* p = (uint8_t*)block + sizeof(mi_block_t);
-      _mi_os_reset(p, csize, &_mi_stats_main);  // note: cannot use segment_decommit on huge segments
+      _mi_os_reset(p, csize, mi_global._mi_stats_main);  // note: cannot use segment_decommit on huge segments
     }
   }
 }

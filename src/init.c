@@ -141,57 +141,135 @@ mi_threadid_t _mi_thread_id(void) mi_attr_noexcept {
 }
 
 // the thread-local default heap for allocation
-mi_decl_thread mi_heap_t* _mi_heap_default = (mi_heap_t*)&_mi_heap_empty;
+// mi_decl_thread mi_heap_t* _mi_heap_default = (mi_heap_t*)&_mi_heap_empty;
 
-extern mi_heap_t _mi_heap_main;
+// extern mi_heap_t _mi_heap_main;
 
-static mi_tld_t tld_main = {
-  0, false,
-  &_mi_heap_main, & _mi_heap_main,
-  { MI_SEGMENT_SPAN_QUEUES_EMPTY, 0, 0, 0, 0, &tld_main.stats, &tld_main.os }, // segments
-  { 0, &tld_main.stats },  // os
-  { MI_STATS_NULL }       // stats
-};
+// static mi_tld_t tld_main = {
+//   0, false,
+//   &_mi_heap_main, & _mi_heap_main,
+//   { MI_SEGMENT_SPAN_QUEUES_EMPTY, 0, 0, 0, 0, &tld_main.stats, &tld_main.os }, // segments
+//   { 0, &tld_main.stats },  // os
+//   { MI_STATS_NULL }       // stats
+// };
 
-mi_heap_t _mi_heap_main = {
-  &tld_main,
-  MI_SMALL_PAGES_EMPTY,
-  MI_PAGE_QUEUES_EMPTY,
-  MI_ATOMIC_VAR_INIT(NULL),
-  0,                // thread id
-  0,                // initial cookie
-  0,                // arena id
-  { 0, 0 },         // the key of the main heap can be fixed (unlike page keys that need to be secure!)
-  { {0x846ca68b}, {0}, 0, true },  // random
-  0,                // page count
-  MI_BIN_FULL, 0,   // page retired min/max
-  NULL,             // next heap
-  false             // can reclaim
-};
+// mi_heap_t _mi_heap_main = {
+//   &tld_main,
+//   MI_SMALL_PAGES_EMPTY,
+//   MI_PAGE_QUEUES_EMPTY,
+//   MI_ATOMIC_VAR_INIT(NULL),
+//   0,                // thread id
+//   0,                // initial cookie
+//   0,                // arena id
+//   { 0, 0 },         // the key of the main heap can be fixed (unlike page keys that need to be secure!)
+//   { {0x846ca68b}, {0}, 0, true },  // random
+//   0,                // page count
+//   MI_BIN_FULL, 0,   // page retired min/max
+//   NULL,             // next heap
+//   false             // can reclaim
+// };
 
 bool _mi_process_is_initialized = false;  // set to `true` in `mi_process_init`.
 
 mi_stats_t _mi_stats_main = { MI_STATS_NULL };
 
+mi_global_t mi_global; 
 
 static void mi_heap_main_init(void) {
-  if (_mi_heap_main.cookie == 0) {
-    _mi_heap_main.thread_id = _mi_thread_id();
-    _mi_heap_main.cookie = 1;
+  if (mi_global._mi_heap_main->cookie == 0) {
+    mi_global._mi_heap_main->thread_id = _mi_thread_id();
+    mi_global._mi_heap_main->cookie = 1;
     #if defined(_WIN32) && !defined(MI_SHARED_LIB)
       _mi_random_init_weak(&_mi_heap_main.random);    // prevent allocation failure during bcrypt dll initialization with static linking
     #else
-      _mi_random_init(&_mi_heap_main.random);
+      _mi_random_init(&mi_global._mi_heap_main->random);
     #endif
-    _mi_heap_main.cookie  = _mi_heap_random_next(&_mi_heap_main);
-    _mi_heap_main.keys[0] = _mi_heap_random_next(&_mi_heap_main);
-    _mi_heap_main.keys[1] = _mi_heap_random_next(&_mi_heap_main);
+    mi_global._mi_heap_main->cookie  = _mi_heap_random_next(mi_global._mi_heap_main);
+    mi_global._mi_heap_main->keys[0] = _mi_heap_random_next(mi_global._mi_heap_main);
+    mi_global._mi_heap_main->keys[1] = _mi_heap_random_next(mi_global._mi_heap_main);
   }
 }
 
 mi_heap_t* _mi_heap_main_get(void) {
   mi_heap_main_init();
-  return &_mi_heap_main;
+  return mi_global._mi_heap_main;
+}
+
+/* Every occurence of the following variables will now be accessed via mi_global:
+ * _mi_heap_default
+ * _mi_heap_main
+ * tld_main
+ * _mi_stats_main
+ * 
+ * In the event of a compartment switch, the pointers to these variables will change
+ * to point to the variables of the new compartment
+ */
+
+static void mi_global_init(void) {
+  if (mi_global.isInitialized) {
+    return;
+  }
+
+  // Allocate _mi_heap_default
+  // mi_global._mi_heap_default = (mi_heap_t*) malloc(sizeof(mi_heap_t));
+  // *mi_global._mi_heap_default = _mi_heap_empty;
+
+  // Allocate memory for _mi_heap_main
+  mi_global._mi_heap_main = (mi_heap_t *) malloc(sizeof(mi_heap_t));
+  // Allocate tld main
+  mi_global.tld_main = (mi_tld_t *) malloc(sizeof(mi_tld_t));
+  
+  // Initialize _mi_heap_main with empty heap;
+  mi_global._mi_heap_main->tld                    =   mi_global.tld_main;
+
+  mi_page_t*            pages_free_direct[MI_PAGES_DIRECT] = MI_SMALL_PAGES_EMPTY;
+  for(unsigned int i = 0U; i < MI_PAGES_DIRECT; i++){
+    mi_global._mi_heap_main->pages_free_direct[i]       =   (mi_page_t *) malloc(sizeof(mi_page_t));
+    *mi_global._mi_heap_main->pages_free_direct[i]      =   *pages_free_direct[i];  // Copying the contents of the pointer instead of changing addresses
+  }
+
+  mi_page_queue_t       pages[MI_BIN_FULL + 1] = MI_PAGE_QUEUES_EMPTY;
+  for(unsigned int i = 0U; i < MI_BIN_FULL + 1; i++){
+    mi_global._mi_heap_main->pages[i]                  =    pages[i];
+  }
+
+  mi_global._mi_heap_main->thread_delayed_free    =   MI_ATOMIC_VAR_INIT(NULL);
+  mi_global._mi_heap_main->thread_id              =   0;
+  mi_global._mi_heap_main->arena_id               =   0;
+  mi_global._mi_heap_main->cookie                 =   0;
+
+  mi_global._mi_heap_main->keys[0]                =   0;
+  mi_global._mi_heap_main->keys[1]                =   0;
+
+  mi_random_ctx_t       random = { {0x846ca68b}, {0}, 0, true };
+  mi_global._mi_heap_main->random                 =   random;
+
+  mi_global._mi_heap_main->page_count             =   0;
+  mi_global._mi_heap_main->page_retired_min       =   MI_BIN_FULL;
+  mi_global._mi_heap_main->page_retired_max       =   0;
+  mi_global._mi_heap_main->next                   =   NULL;
+  mi_global._mi_heap_main->no_reclaim             =   false;
+
+  // Initialize tld main
+  mi_global.tld_main->heartbeat                   =   0;
+  mi_global.tld_main->recurse                     =   false;
+  mi_global.tld_main->heap_backing                =   mi_global._mi_heap_main;
+  mi_global.tld_main->heaps                       =   mi_global._mi_heap_main;
+
+  mi_segments_tld_t   segments  = { MI_SEGMENT_SPAN_QUEUES_EMPTY, 0, 0, 0, 0, &mi_global.tld_main->stats, &mi_global.tld_main->os };
+  mi_global.tld_main->segments                    =   segments;
+
+  mi_global.tld_main->os.region_idx               =   0;
+  mi_global.tld_main->os.stats                    =   &mi_global.tld_main->stats;
+
+  mi_global._mi_stats_main                        =   (mi_stats_t *) malloc(sizeof(mi_stats_t));
+  mi_stats_t _mi_stats_main = { MI_STATS_NULL };
+  *mi_global._mi_stats_main = _mi_stats_main;
+
+  mi_global.isInitialized = true;
+
+  mi_heap_main_init();
+
 }
 
 
@@ -233,10 +311,10 @@ static mi_thread_data_t* mi_thread_data_zalloc(void) {
   // if that fails, allocate as meta data
   if (td == NULL) {
     mi_memid_t memid;
-    td = (mi_thread_data_t*)_mi_os_alloc(sizeof(mi_thread_data_t), &memid, &_mi_stats_main);
+    td = (mi_thread_data_t*)_mi_os_alloc(sizeof(mi_thread_data_t), &memid, mi_global._mi_stats_main);
     if (td == NULL) {
       // if this fails, try once more. (issue #257)
-      td = (mi_thread_data_t*)_mi_os_alloc(sizeof(mi_thread_data_t), &memid, &_mi_stats_main);
+      td = (mi_thread_data_t*)_mi_os_alloc(sizeof(mi_thread_data_t), &memid, mi_global._mi_stats_main);
       if (td == NULL) {
         // really out of memory
         _mi_error_message(ENOMEM, "unable to allocate thread local heap metadata (%zu bytes)\n", sizeof(mi_thread_data_t));
@@ -266,7 +344,7 @@ static void mi_thread_data_free( mi_thread_data_t* tdfree ) {
     }
   }
   // if that fails, just free it directly
-  _mi_os_free(tdfree, sizeof(mi_thread_data_t), tdfree->memid, &_mi_stats_main);
+  _mi_os_free(tdfree, sizeof(mi_thread_data_t), tdfree->memid, mi_global._mi_stats_main);
 }
 
 void _mi_thread_data_collect(void) {
@@ -276,7 +354,7 @@ void _mi_thread_data_collect(void) {
     if (td != NULL) {
       td = mi_atomic_exchange_ptr_acq_rel(mi_thread_data_t, &td_cache[i], NULL);
       if (td != NULL) {
-        _mi_os_free(td, sizeof(mi_thread_data_t), td->memid, &_mi_stats_main);
+        _mi_os_free(td, sizeof(mi_thread_data_t), td->memid, mi_global._mi_stats_main);
       }
     }
   }
@@ -289,7 +367,7 @@ static bool _mi_heap_init(void) {
     // mi_assert_internal(_mi_heap_main.thread_id != 0);  // can happen on freeBSD where alloc is called before any initialization
     // the main heap is statically allocated
     mi_heap_main_init();
-    _mi_heap_set_default_direct(&_mi_heap_main);
+    _mi_heap_set_default_direct(mi_global._mi_heap_main);
     //mi_assert_internal(_mi_heap_default->tld->heap_backing == mi_prim_get_default_heap());
   }
   else {
@@ -322,7 +400,7 @@ static bool _mi_heap_done(mi_heap_t* heap) {
   if (!mi_heap_is_initialized(heap)) return true;
 
   // reset default heap
-  _mi_heap_set_default_direct(_mi_is_main_thread() ? &_mi_heap_main : (mi_heap_t*)&_mi_heap_empty);
+  _mi_heap_set_default_direct(_mi_is_main_thread() ? mi_global._mi_heap_main : (mi_heap_t*)&_mi_heap_empty);
 
   // switch to backing heap
   heap = heap->tld->heap_backing;
@@ -342,7 +420,7 @@ static bool _mi_heap_done(mi_heap_t* heap) {
   mi_assert_internal(mi_heap_is_backing(heap));
 
   // collect if not the main thread
-  if (heap != &_mi_heap_main) {
+  if (heap != mi_global._mi_heap_main) {
     _mi_heap_collect_abandon(heap);
   }
 
@@ -350,7 +428,7 @@ static bool _mi_heap_done(mi_heap_t* heap) {
   _mi_stats_done(&heap->tld->stats);
 
   // free if not the main thread
-  if (heap != &_mi_heap_main) {
+  if (heap != mi_global._mi_heap_main) {
     // the following assertion does not always hold for huge segments as those are always treated
     // as abondened: one may allocate it in one thread, but deallocate in another in which case
     // the count can be too large or negative. todo: perhaps not count huge segments? see issue #363
@@ -392,12 +470,12 @@ static void mi_process_setup_auto_thread_done(void) {
   if (tls_initialized) return;
   tls_initialized = true;
   _mi_prim_thread_init_auto_done();
-  _mi_heap_set_default_direct(&_mi_heap_main);
+  _mi_heap_set_default_direct(mi_global._mi_heap_main);
 }
 
 
 bool _mi_is_main_thread(void) {
-  return (_mi_heap_main.thread_id==0 || _mi_heap_main.thread_id == _mi_thread_id());
+  return (mi_global._mi_heap_main->thread_id==0 || mi_global._mi_heap_main->thread_id == _mi_thread_id());
 }
 
 static _Atomic(size_t) thread_count = MI_ATOMIC_VAR_INIT(1);
@@ -417,7 +495,7 @@ void mi_thread_init(void) mi_attr_noexcept
   //  fiber/pthread key to a non-zero value, ensuring `_mi_thread_done` is called)
   if (_mi_heap_init()) return;  // returns true if already initialized
 
-  _mi_stat_increase(&_mi_stats_main.threads, 1);
+  _mi_stat_increase(&mi_global._mi_stats_main->threads, 1);
   mi_atomic_increment_relaxed(&thread_count);
   //_mi_verbose_message("thread init: 0x%zx\n", _mi_thread_id());
 }
@@ -441,7 +519,7 @@ void _mi_thread_done(mi_heap_t* heap)
 
   // adjust stats
   mi_atomic_decrement_relaxed(&thread_count);
-  _mi_stat_decrease(&_mi_stats_main.threads, 1);
+  _mi_stat_decrease(&mi_global._mi_stats_main->threads, 1);
   
   // check thread-id as on Windows shutdown with FLS the main (exit) thread may call this on thread-local heaps...
   if (heap->thread_id != _mi_thread_id()) return;
@@ -459,7 +537,7 @@ void _mi_heap_set_default_direct(mi_heap_t* heap)  {
   #elif defined(MI_TLS_PTHREAD)
   // we use _mi_heap_default_key
   #else
-  _mi_heap_default = heap;
+  mi_global._mi_heap_default = heap;
   #endif
 
   // ensure the default heap is passed to `_mi_thread_done`
@@ -519,6 +597,7 @@ static void mi_allocator_done(void) {
 
 // Called once by the process loader
 static void mi_process_load(void) {
+  mi_global_init();
   mi_heap_main_init();
   #if defined(__APPLE__) || defined(MI_TLS_RECURSE_GUARD)
   volatile mi_heap_t* dummy = _mi_heap_default; // access TLS to allocate it before setting tls_initialized to true;
@@ -542,7 +621,7 @@ static void mi_process_load(void) {
   }
 
   // reseed random
-  _mi_random_reinit_if_weak(&_mi_heap_main.random);
+  _mi_random_reinit_if_weak(& mi_global._mi_heap_main->random);
 }
 
 #if defined(_WIN32) && (defined(_M_IX86) || defined(_M_X64))
@@ -647,7 +726,7 @@ static void mi_cdecl mi_process_done(void) {
     mi_stats_print(NULL);
   }
   mi_allocator_done();
-  _mi_verbose_message("process done: 0x%zx\n", _mi_heap_main.thread_id);
+  _mi_verbose_message("process done: 0x%zx\n", mi_global._mi_heap_main->thread_id);
   os_preloading = true; // don't call the C runtime anymore
 }
 
