@@ -212,13 +212,13 @@ static void mi_global_init(void) {
 
   // Allocate _mi_heap_default
   // mi_global._mi_heap_default = (mi_heap_t*) malloc(sizeof(mi_heap_t));
-  // *mi_global._mi_heap_default = _mi_heap_empty;
+  mi_global._mi_heap_default = &_mi_heap_empty;
 
   // Allocate memory for _mi_heap_main
   mi_global._mi_heap_main = (mi_heap_t *) malloc(sizeof(mi_heap_t));
   // Allocate tld main
   mi_global.tld_main = (mi_tld_t *) malloc(sizeof(mi_tld_t));
-  
+
   // Initialize _mi_heap_main with empty heap;
   mi_global._mi_heap_main->tld                    =   mi_global.tld_main;
 
@@ -270,6 +270,33 @@ static void mi_global_init(void) {
 
   mi_heap_main_init();
 
+}
+
+int currentCompartmentIndex = 0;
+mi_global_t mi_global_compartments[2];
+
+void switch_heap(void) {
+
+  // Storing the current heap globals in the associated compartment
+  mi_global_compartments[currentCompartmentIndex]._mi_heap_default            =     mi_global._mi_heap_default;
+  mi_global_compartments[currentCompartmentIndex]._mi_heap_main               =     mi_global._mi_heap_main;
+  mi_global_compartments[currentCompartmentIndex].tld_main                    =     mi_global.tld_main;
+  mi_global_compartments[currentCompartmentIndex]._mi_stats_main              =     mi_global._mi_stats_main;
+  mi_global_compartments[currentCompartmentIndex].isInitialized               =     mi_global.isInitialized;
+
+  // Loading the new compartment heap globals
+  mi_global._mi_heap_default      =       mi_global_compartments[(currentCompartmentIndex + 1) % 2]._mi_heap_default;
+  mi_global._mi_heap_main         =       mi_global_compartments[(currentCompartmentIndex + 1) % 2]._mi_heap_main;
+  mi_global.tld_main              =       mi_global_compartments[(currentCompartmentIndex + 1) % 2].tld_main;
+  mi_global._mi_stats_main        =       mi_global_compartments[(currentCompartmentIndex + 1) % 2]._mi_stats_main;
+  mi_global.isInitialized         =       mi_global_compartments[(currentCompartmentIndex + 1) % 2].isInitialized;
+
+  currentCompartmentIndex++;
+
+  if(! mi_global.isInitialized){
+    mi_thread_init();   // Not calling process init as it would be too heavy!
+    // mi_thread_init internally calls mi_global_init
+  }
 }
 
 
@@ -487,6 +514,9 @@ size_t  _mi_current_thread_count(void) {
 // This is called from the `mi_malloc_generic`
 void mi_thread_init(void) mi_attr_noexcept
 {
+  // Initializing the heap globals in case it is uninitialized
+  mi_global_init();
+
   // ensure our process has started already
   mi_process_init();
 

@@ -76,7 +76,7 @@ int main(void) {
       printf("[Container 0] p[%d]\t=\t%d\n", i, p_c0[i]);
     }
 
-    // switch_heap();
+    switch_heap();
 
     int * p_c1 = (int * ) mi_malloc(16 * sizeof(int));
     result = (p_c1 != NULL);
