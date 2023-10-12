@@ -141,38 +141,39 @@ mi_threadid_t _mi_thread_id(void) mi_attr_noexcept {
 }
 
 // the thread-local default heap for allocation
-// mi_decl_thread mi_heap_t* _mi_heap_default = (mi_heap_t*)&_mi_heap_empty;
+mi_decl_thread mi_heap_t* _mi_heap_default = (mi_heap_t*)&_mi_heap_empty;
 
-// extern mi_heap_t _mi_heap_main;
+mi_heap_t _mi_heap_main;
 
-// static mi_tld_t tld_main = {
-//   0, false,
-//   &_mi_heap_main, & _mi_heap_main,
-//   { MI_SEGMENT_SPAN_QUEUES_EMPTY, 0, 0, 0, 0, &tld_main.stats, &tld_main.os }, // segments
-//   { 0, &tld_main.stats },  // os
-//   { MI_STATS_NULL }       // stats
-// };
+static mi_tld_t tld_main = {
+  0, false,
+  &_mi_heap_main, & _mi_heap_main,
+  { MI_SEGMENT_SPAN_QUEUES_EMPTY, 0, 0, 0, 0, &tld_main.stats, &tld_main.os }, // segments
+  { 0, &tld_main.stats },  // os
+  { MI_STATS_NULL }       // stats
+};
 
-// mi_heap_t _mi_heap_main = {
-//   &tld_main,
-//   MI_SMALL_PAGES_EMPTY,
-//   MI_PAGE_QUEUES_EMPTY,
-//   MI_ATOMIC_VAR_INIT(NULL),
-//   0,                // thread id
-//   0,                // initial cookie
-//   0,                // arena id
-//   { 0, 0 },         // the key of the main heap can be fixed (unlike page keys that need to be secure!)
-//   { {0x846ca68b}, {0}, 0, true },  // random
-//   0,                // page count
-//   MI_BIN_FULL, 0,   // page retired min/max
-//   NULL,             // next heap
-//   false             // can reclaim
-// };
+mi_heap_t _mi_heap_main = {
+  &tld_main,
+  MI_SMALL_PAGES_EMPTY,
+  MI_PAGE_QUEUES_EMPTY,
+  MI_ATOMIC_VAR_INIT(NULL),
+  0,                // thread id
+  0,                // initial cookie
+  0,                // arena id
+  { 0, 0 },         // the key of the main heap can be fixed (unlike page keys that need to be secure!)
+  { {0x846ca68b}, {0}, 0, true },  // random
+  0,                // page count
+  MI_BIN_FULL, 0,   // page retired min/max
+  NULL,             // next heap
+  false             // can reclaim
+};
 
 bool _mi_process_is_initialized = false;  // set to `true` in `mi_process_init`.
 
 mi_stats_t _mi_stats_main = { MI_STATS_NULL };
 
+// This holds the global variables for currently active compartment
 mi_global_t mi_global; 
 
 static void mi_heap_main_init(void) {
@@ -205,98 +206,264 @@ mi_heap_t* _mi_heap_main_get(void) {
  * to point to the variables of the new compartment
  */
 
-static void mi_global_init(void) {
-  if (mi_global.isInitialized) {
+static void mi_compartment_init(mi_global_t * compartment) {
+  if (compartment->isInitialized) {
     return;
   }
 
+  // IMPORTANT: This function uses manager compartment's heap
+  // to allocate data for the new compartment's globals
+  // So every compartment's global data resides in the manager compartment's heap!
+  // I don't know if it will break security(VMAs) in hardware!!!!!!
+
   // Allocate _mi_heap_default
-  // mi_global._mi_heap_default = (mi_heap_t*) malloc(sizeof(mi_heap_t));
-  mi_global._mi_heap_default = &_mi_heap_empty;
+  compartment->_mi_heap_default = (mi_heap_t   *) &_mi_heap_empty;
 
   // Allocate memory for _mi_heap_main
-  mi_global._mi_heap_main = (mi_heap_t *) malloc(sizeof(mi_heap_t));
+  compartment->_mi_heap_main = (mi_heap_t *) mi_malloc(sizeof(mi_heap_t));
   // Allocate tld main
-  mi_global.tld_main = (mi_tld_t *) malloc(sizeof(mi_tld_t));
+  compartment->tld_main = (mi_tld_t *) mi_malloc(sizeof(mi_tld_t));
 
   // Initialize _mi_heap_main with empty heap;
-  mi_global._mi_heap_main->tld                    =   mi_global.tld_main;
+  compartment->_mi_heap_main->tld                    =   compartment->tld_main;
 
   mi_page_t*            pages_free_direct[MI_PAGES_DIRECT] = MI_SMALL_PAGES_EMPTY;
   for(unsigned int i = 0U; i < MI_PAGES_DIRECT; i++){
-    mi_global._mi_heap_main->pages_free_direct[i]       =   (mi_page_t *) malloc(sizeof(mi_page_t));
-    *mi_global._mi_heap_main->pages_free_direct[i]      =   *pages_free_direct[i];  // Copying the contents of the pointer instead of changing addresses
+    compartment->_mi_heap_main->pages_free_direct[i]       =   (mi_page_t *) mi_malloc(sizeof(mi_page_t));
+    *compartment->_mi_heap_main->pages_free_direct[i]      =   *pages_free_direct[i];  // Copying the contents of the pointer instead of changing addresses
   }
 
   mi_page_queue_t       pages[MI_BIN_FULL + 1] = MI_PAGE_QUEUES_EMPTY;
   for(unsigned int i = 0U; i < MI_BIN_FULL + 1; i++){
-    mi_global._mi_heap_main->pages[i]                  =    pages[i];
+    compartment->_mi_heap_main->pages[i]                  =    pages[i];
   }
 
-  mi_global._mi_heap_main->thread_delayed_free    =   MI_ATOMIC_VAR_INIT(NULL);
-  mi_global._mi_heap_main->thread_id              =   0;
-  mi_global._mi_heap_main->arena_id               =   0;
-  mi_global._mi_heap_main->cookie                 =   0;
+  compartment->_mi_heap_main->thread_delayed_free    =   MI_ATOMIC_VAR_INIT(NULL);
+  compartment->_mi_heap_main->thread_id              =   0;
+  compartment->_mi_heap_main->arena_id               =   0;
+  compartment->_mi_heap_main->cookie                 =   0;
 
-  mi_global._mi_heap_main->keys[0]                =   0;
-  mi_global._mi_heap_main->keys[1]                =   0;
+  compartment->_mi_heap_main->keys[0]                =   0;
+  compartment->_mi_heap_main->keys[1]                =   0;
 
   mi_random_ctx_t       random = { {0x846ca68b}, {0}, 0, true };
-  mi_global._mi_heap_main->random                 =   random;
+  compartment->_mi_heap_main->random                 =   random;
 
-  mi_global._mi_heap_main->page_count             =   0;
-  mi_global._mi_heap_main->page_retired_min       =   MI_BIN_FULL;
-  mi_global._mi_heap_main->page_retired_max       =   0;
-  mi_global._mi_heap_main->next                   =   NULL;
-  mi_global._mi_heap_main->no_reclaim             =   false;
+  compartment->_mi_heap_main->page_count             =   0;
+  compartment->_mi_heap_main->page_retired_min       =   MI_BIN_FULL;
+  compartment->_mi_heap_main->page_retired_max       =   0;
+  compartment->_mi_heap_main->next                   =   NULL;
+  compartment->_mi_heap_main->no_reclaim             =   false;
 
   // Initialize tld main
-  mi_global.tld_main->heartbeat                   =   0;
-  mi_global.tld_main->recurse                     =   false;
-  mi_global.tld_main->heap_backing                =   mi_global._mi_heap_main;
-  mi_global.tld_main->heaps                       =   mi_global._mi_heap_main;
+  compartment->tld_main->heartbeat                   =   0;
+  compartment->tld_main->recurse                     =   false;
+  compartment->tld_main->heap_backing                =   compartment->_mi_heap_main;
+  compartment->tld_main->heaps                       =   compartment->_mi_heap_main;
 
-  mi_segments_tld_t   segments  = { MI_SEGMENT_SPAN_QUEUES_EMPTY, 0, 0, 0, 0, &mi_global.tld_main->stats, &mi_global.tld_main->os };
-  mi_global.tld_main->segments                    =   segments;
+  mi_segments_tld_t   segments  = { MI_SEGMENT_SPAN_QUEUES_EMPTY, 0, 0, 0, 0, &compartment->tld_main->stats, &compartment->tld_main->os };
+  compartment->tld_main->segments                    =   segments;
 
-  mi_global.tld_main->os.region_idx               =   0;
-  mi_global.tld_main->os.stats                    =   &mi_global.tld_main->stats;
+  compartment->tld_main->os.region_idx               =   0;
+  compartment->tld_main->os.stats                    =   &compartment->tld_main->stats;
 
-  mi_global._mi_stats_main                        =   (mi_stats_t *) malloc(sizeof(mi_stats_t));
+  compartment->_mi_stats_main                        =   (mi_stats_t *) malloc(sizeof(mi_stats_t));
   mi_stats_t _mi_stats_main = { MI_STATS_NULL };
-  *mi_global._mi_stats_main = _mi_stats_main;
+  *compartment->_mi_stats_main = _mi_stats_main;
 
-  mi_global.isInitialized = true;
-
-  mi_heap_main_init();
-
+  compartment->isInitialized = true;
 }
 
-int currentCompartmentIndex = 0;
-mi_global_t mi_global_compartments[2];
 
-void switch_heap(void) {
+// Manager compartment is statically allocated
+// This compartment will have a heap that will dynamically allocate mi_global_t compartment variables
+// for the subsequent compartments as and when they are created 
+mi_global_t manager_compartment;
 
-  // Storing the current heap globals in the associated compartment
-  mi_global_compartments[currentCompartmentIndex]._mi_heap_default            =     mi_global._mi_heap_default;
-  mi_global_compartments[currentCompartmentIndex]._mi_heap_main               =     mi_global._mi_heap_main;
-  mi_global_compartments[currentCompartmentIndex].tld_main                    =     mi_global.tld_main;
-  mi_global_compartments[currentCompartmentIndex]._mi_stats_main              =     mi_global._mi_stats_main;
-  mi_global_compartments[currentCompartmentIndex].isInitialized               =     mi_global.isInitialized;
+// Returns the pointer to compartment with compartment_id passed as an argument
+// All the compartments are being held in a linked list
+// This linked list has it's root in the manager compartment
+// get_compartment will traverse the linked list and return
+// the compartment which matches the compartment_id
+mi_global_t * get_compartment(uint64_t compartment_id){
+
+  if(compartment_id == manager_compartment.compartment_id) {
+    return & manager_compartment;
+  }
+
+  mi_global_t * matching_compartment = manager_compartment.next_compartment;
+
+  while(matching_compartment != NULL){
+    if(matching_compartment->compartment_id == compartment_id){
+      break;
+    }
+
+    matching_compartment = matching_compartment->next_compartment;
+  }
+
+  return matching_compartment;
+}
+
+// Returns the pointer to the last compartment in the compartment list
+mi_global_t * get_last_compartment(){
+  mi_global_t * last_compartment = & manager_compartment;
+
+  while (last_compartment->next_compartment != NULL){
+    last_compartment = last_compartment->next_compartment;
+  }
+
+  return last_compartment;
+}
+
+// Creates the manager compartment:
+// Manager compartment's heap globals
+// are static. They are present as global
+// variables. The subsequent compartments
+// will have their heap globals allocated in
+// manager compartment's heap
+// Manager will be initialized after it is created
+// with an explicit call to mi_compartment_init
+void create_manager_compartment(void){
+  manager_compartment._mi_heap_default      =   _mi_heap_default;
+  manager_compartment._mi_heap_main         =   &_mi_heap_main;
+  manager_compartment.tld_main              =   &tld_main;
+  manager_compartment._mi_stats_main        =   &_mi_stats_main;
+  manager_compartment.isInitialized         =   true; // This is set to true as we don't want 
+                                                      // mi_compartment_init to initialize manager compartment
+                                                      // as it is statically initialized
+
+  manager_compartment.next_compartment      =   NULL; // Currently, there are no compartments other than manager
+  manager_compartment.compartment_id        =   rand(); 
+
+  // Set the Manager compartment as the current active compartment after initialization
+  mi_global._mi_heap_default                =   manager_compartment._mi_heap_default;
+  mi_global._mi_heap_main                   =   manager_compartment._mi_heap_main;
+  mi_global.tld_main                        =   manager_compartment.tld_main;
+  mi_global._mi_stats_main                  =   manager_compartment._mi_stats_main;
+  mi_global.isInitialized                   =   manager_compartment.isInitialized;
+  mi_global.compartment_id                  =   manager_compartment.compartment_id; 
+}
+
+// Switch from the current compartment to Manager Compartment
+// If the current compartment is manager; return
+// Otherwise first, get the compartment we want to switch to
+// then store the current globals(mi_global) to the associated compartment's globals
+// then load the manager's globals into the current globals(mi_global)
+void switch_to_manager_compartment(void) {
+
+  if(mi_global.compartment_id == manager_compartment.compartment_id){
+    return; // Manager is already the active compartment
+  }
+
+  mi_global_t * mi_global_compartment = get_compartment(mi_global.compartment_id);
+
+  // Storing the current compartment globals in the associated compartment
+  mi_global_compartment->_mi_heap_default            =     mi_global._mi_heap_default;
+  mi_global_compartment->_mi_heap_main               =     mi_global._mi_heap_main;
+  mi_global_compartment->tld_main                    =     mi_global.tld_main;
+  mi_global_compartment->_mi_stats_main              =     mi_global._mi_stats_main;
+  mi_global_compartment->isInitialized               =     mi_global.isInitialized;
 
   // Loading the new compartment heap globals
-  mi_global._mi_heap_default      =       mi_global_compartments[(currentCompartmentIndex + 1) % 2]._mi_heap_default;
-  mi_global._mi_heap_main         =       mi_global_compartments[(currentCompartmentIndex + 1) % 2]._mi_heap_main;
-  mi_global.tld_main              =       mi_global_compartments[(currentCompartmentIndex + 1) % 2].tld_main;
-  mi_global._mi_stats_main        =       mi_global_compartments[(currentCompartmentIndex + 1) % 2]._mi_stats_main;
-  mi_global.isInitialized         =       mi_global_compartments[(currentCompartmentIndex + 1) % 2].isInitialized;
+  mi_global._mi_heap_default      =       manager_compartment._mi_heap_default;
+  mi_global._mi_heap_main         =       manager_compartment._mi_heap_main;
+  mi_global.tld_main              =       manager_compartment.tld_main;
+  mi_global._mi_stats_main        =       manager_compartment._mi_stats_main;
+  mi_global.isInitialized         =       manager_compartment.isInitialized;
+  mi_global.compartment_id        =       manager_compartment.compartment_id;
+}
 
-  currentCompartmentIndex++;
 
-  if(! mi_global.isInitialized){
-    mi_thread_init();   // Not calling process init as it would be too heavy!
-    // mi_thread_init internally calls mi_global_init
+// Before calling this function, we need to make sure that the
+// current compartment is indeed the manager
+void switch_from_manager_compartment(uint64_t compartment_id) {
+
+  if(compartment_id == manager_compartment.compartment_id){
+    return; // Manager is we want to switch to
   }
+
+  // This is the compartment we need to switch to 
+  mi_global_t * mi_global_compartment = get_compartment(compartment_id);
+
+  // Currently, mi_global is the manager compartment
+
+  // Update the data of manager compartment
+  manager_compartment._mi_heap_default            =     mi_global._mi_heap_default;
+  manager_compartment._mi_heap_main               =     mi_global._mi_heap_main;
+  manager_compartment.tld_main                    =     mi_global.tld_main;
+  manager_compartment._mi_stats_main              =     mi_global._mi_stats_main;
+  manager_compartment.isInitialized               =     mi_global.isInitialized;
+
+  // Loading the new compartment heap globals
+  mi_global._mi_heap_default      =       mi_global_compartment->_mi_heap_default;
+  mi_global._mi_heap_main         =       mi_global_compartment->_mi_heap_main;
+  mi_global.tld_main              =       mi_global_compartment->tld_main;
+  mi_global._mi_stats_main        =       mi_global_compartment->_mi_stats_main;
+  mi_global.isInitialized         =       mi_global_compartment->isInitialized;
+  mi_global.compartment_id        =       mi_global_compartment->compartment_id;
+}
+
+
+uint64_t create_compartment(void){
+
+  // Get the active compartment as we will need  it to
+  // switch back to it after new compartment has been created by the
+  // manager compartment
+  mi_global_t * active_compartment    =   get_compartment(mi_global.compartment_id);
+
+  // First switch to manager compartment as only
+  // manager compartment can allocate space for 
+  // new compartments in its heap
+  // !NOTE: For this to work, Manager compartment needs to have 
+  // permissions to modify all the other compartments
+  switch_to_manager_compartment();
+
+  // Allocate a new compartment using manager compartment
+  mi_global_t * new_compartment       =   (mi_global_t *) mi_malloc (sizeof(mi_global_t));
+  mi_global_t * last_compartment      =   get_last_compartment();
+
+  last_compartment->next_compartment  =   new_compartment;
+
+  new_compartment->compartment_id     =   rand();
+  new_compartment->next_compartment   =   NULL;
+  new_compartment->isInitialized      =   false;
+
+  // Initialize the new compartment while 
+  // the manager compartment is active
+  // as the initialization uses manager's heap
+  // to allocate globals for the new compartment
+  mi_compartment_init(new_compartment);
+
+  // Switch from manager to the previously active compartment
+  // It is guaranteed that the current compartment during this 
+  // function call will be manager compartment
+  // as we have switched to manager using switch_to_manager_compartment()
+  switch_from_manager_compartment(active_compartment->compartment_id);
+
+  return new_compartment->compartment_id;
+}
+
+// Switch to the compartment with compartment_id passed as the parameter
+void switch_compartment(uint64_t compartment_id) {
+  // Pointer to the compartment to which we want to switch
+  mi_global_t * switch_to_compartment       =     get_compartment(compartment_id);
+  mi_global_t * switch_from_compartment     =     get_compartment(mi_global.compartment_id);  // Need to write the updated compartment globals into switch_from_compartment
+
+  // Storing the current compartment globals in the associated compartment
+  switch_from_compartment->_mi_heap_default            =     mi_global._mi_heap_default;
+  switch_from_compartment->_mi_heap_main               =     mi_global._mi_heap_main;
+  switch_from_compartment->tld_main                    =     mi_global.tld_main;
+  switch_from_compartment->_mi_stats_main              =     mi_global._mi_stats_main;
+  switch_from_compartment->isInitialized               =     mi_global.isInitialized;
+  switch_from_compartment->compartment_id              =     mi_global.compartment_id;
+
+  // Loading the new compartment heap globals
+  mi_global._mi_heap_default      =       switch_to_compartment->_mi_heap_default;
+  mi_global._mi_heap_main         =       switch_to_compartment->_mi_heap_main;
+  mi_global.tld_main              =       switch_to_compartment->tld_main;
+  mi_global._mi_stats_main        =       switch_to_compartment->_mi_stats_main;
+  mi_global.isInitialized         =       switch_to_compartment->isInitialized;
+  mi_global.compartment_id        =       switch_to_compartment->compartment_id;
 }
 
 
@@ -514,9 +681,6 @@ size_t  _mi_current_thread_count(void) {
 // This is called from the `mi_malloc_generic`
 void mi_thread_init(void) mi_attr_noexcept
 {
-  // Initializing the heap globals in case it is uninitialized
-  mi_global_init();
-
   // ensure our process has started already
   mi_process_init();
 
@@ -627,7 +791,13 @@ static void mi_allocator_done(void) {
 
 // Called once by the process loader
 static void mi_process_load(void) {
-  mi_global_init();
+
+  // Process loader creates the manager compartment
+  // and initializes it as well
+  create_manager_compartment();
+  mi_compartment_init(& manager_compartment);  // Initialize the manager when process loads
+
+  
   mi_heap_main_init();
   #if defined(__APPLE__) || defined(MI_TLS_RECURSE_GUARD)
   volatile mi_heap_t* dummy = _mi_heap_default; // access TLS to allocate it before setting tls_initialized to true;

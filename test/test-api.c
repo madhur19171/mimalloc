@@ -65,32 +65,71 @@ int main(void) {
   // ---------------------------------------------------
 
   CHECK_BODY("malloc-zero") {
-    int * p_c0 = (int * ) mi_malloc(16 * sizeof(int));
+
+    int * p_c0;
+    int * p_c1;
+
+    // Round 1
+    uint64_t compartment_0 = create_compartment();
+    switch_compartment(compartment_0);
+    p_c0 = (int * ) mi_malloc(16 * sizeof(int));
     result = (p_c0 != NULL);
 
     for (int i = 0; i < 16; i++){
       p_c0[i] = i;
     }
     printf("\n");
+    printf("Base Pointer: %p\n", p_c0);
     for (int i = 0; i < 16; i++){
-      printf("[Container 0] p[%d]\t=\t%d\n", i, p_c0[i]);
+      printf("[Compartment 0] p[%d]\t=\t%d\n", i, p_c0[i]);
     }
+    mi_free(p_c0);
 
-    switch_heap();
-
-    int * p_c1 = (int * ) mi_malloc(16 * sizeof(int));
+    uint64_t compartment_1 = create_compartment();
+    switch_compartment(compartment_1);
+    p_c1 = (int * ) mi_malloc(16 * sizeof(int));
     result = (p_c1 != NULL);
 
     for (int i = 0; i < 16; i++){
       p_c1[i] = 50 + i;
     }
     printf("\n");
+    printf("Base Pointer: %p\n", p_c1);
     for (int i = 0; i < 16; i++){
-      printf("[Container 1] p[%d]\t=\t%d\n", i, p_c1[i]);
+      printf("[Compartment 1] p[%d]\t=\t%d\n", i, p_c1[i]);
     }
-
-    mi_free(p_c0);
     mi_free(p_c1);
+
+
+    // Round 2
+    switch_compartment(compartment_0);
+    p_c0 = (int * ) mi_malloc(16 * sizeof(int));
+    result = (p_c0 != NULL);
+
+    for (int i = 0; i < 16; i++){
+      p_c0[i] = 2 * i;
+    }
+    printf("\n");
+    printf("Base Pointer: %p\n", p_c0);
+    for (int i = 0; i < 16; i++){
+      printf("[Compartment 0] p[%d]\t=\t%d\n", i, p_c0[i]);
+    }
+    mi_free(p_c0);
+
+    switch_compartment(compartment_1);
+    p_c1 = (int * ) mi_malloc(16 * sizeof(int));
+    result = (p_c1 != NULL);
+
+    for (int i = 0; i < 16; i++){
+      p_c1[i] = 50 + 2 * i;
+    }
+    printf("\n");
+    printf("Base Pointer: %p\n", p_c1);
+    for (int i = 0; i < 16; i++){
+      printf("[Compartment 1] p[%d]\t=\t%d\n", i, p_c1[i]);
+    }
+    mi_free(p_c1);
+
   };
   // CHECK_BODY("malloc-nomem1") {
   //   result = (mi_malloc((size_t)PTRDIFF_MAX + (size_t)1) == NULL);

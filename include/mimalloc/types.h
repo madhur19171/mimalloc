@@ -673,6 +673,9 @@ struct mi_global_s {
   mi_tld_t    *   tld_main;
   mi_stats_t  *   _mi_stats_main;
   bool            isInitialized;
+
+  uint64_t  compartment_id;
+  struct mi_global_s * next_compartment;
 };
 
 #endif
