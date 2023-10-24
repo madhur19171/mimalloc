@@ -16,6 +16,8 @@ terms of the MIT license. A copy of the license can be found in the file
 #include <string.h>      // memset, strlen (for mi_strdup)
 #include <stdlib.h>      // malloc, abort
 
+#include <stdio.h>
+
 #define MI_IN_ALLOC_C
 #include "alloc-override.c"
 #undef MI_IN_ALLOC_C
@@ -173,6 +175,7 @@ mi_decl_nodiscard extern inline mi_decl_restrict void* mi_heap_malloc(mi_heap_t*
 }
 
 mi_decl_nodiscard extern inline mi_decl_restrict void* mi_malloc(size_t size) mi_attr_noexcept {
+  printf("mimalloc called\n");
   return mi_heap_malloc(mi_prim_get_default_heap(), size);
 }
 

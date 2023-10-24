@@ -281,6 +281,8 @@ static void* mi_os_prim_alloc_aligned(size_t size, size_t alignment, bool commit
   }
 
   mi_assert_internal(p == NULL || (p != NULL && *base != NULL && ((uintptr_t)p % alignment) == 0));
+
+  printf("[mi_os_prim_alloc_aligned] p: %llx\n", p);
   return p;
 }
 

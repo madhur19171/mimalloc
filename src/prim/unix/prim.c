@@ -94,6 +94,231 @@ static int mi_prim_access(const char *fpath, int mode) {
 #endif
 
 
+// VMA Stuff
+
+int clog2(int x){
+  if(x == 0) return 0;
+
+  int ret = 0;
+
+  while (x != 1) {
+    x = x >> 1;
+    ret++;
+  }
+
+  if((1 << ret) < x){
+    ret++;
+  }
+
+  return ret;
+}
+
+int flog2(int x){
+  if(x == 0) return 0;
+  
+  int ret = 0;
+
+  while (x != 1) {
+    x = x >> 1;
+    ret++;
+  }
+
+  return ret;
+}
+
+
+int init(void) {
+    unsigned long buf[2];
+
+    if (syscall(252, 1, uatc, buf) == 0) {
+        uatp = (struct vma_t *)(buf[0]);
+        offs =                  buf[1];
+        return 0;
+    }
+
+    fprintf(stderr, "Unable to initialize UAT\n");
+    return 1;
+}
+
+
+struct vma_t *trans(uint64_t addr) {
+    uint64_t idx_s =  uatc        & 0x3flu;
+    uint64_t vsc_s = (uatc >>  8) & 0x3flu;
+    uint64_t top_s = (uatc >> 16) & 0x3flu;
+    uint64_t siz_s = (uatc >> 24) & 0x3flu;
+
+    uint64_t idx   = (addr & ((1lu << vsc_s) - 1lu)) >> idx_s;
+    uint64_t vsc   = (addr & ((1lu << top_s) - 1lu)) >> vsc_s;
+    uint64_t top   =  addr                           >> top_s;
+    uint64_t tsl   =  vsc_s - idx_s;
+
+    uint64_t mask  = (1lu << vsc) -  1lu;
+    uint64_t offs  = (top << tsl) + (idx & ~mask) + (mask >> 1);
+
+    offs = (offs << 1) + (vsc ? 1lu : 0lu);
+
+    if (offs >= (1lu << siz_s))
+        return 0;
+
+    return uatp + offs;
+}
+
+void init_uatc(void) {
+    uint64_t idx_s  = (21) & (0x3flu);
+    uint64_t vsc_s  = (idx_s + (uint64_t)(clog2(MAX_NODES_IN_FREE_LIST))) & (0x3flu);
+    uint64_t top_s  = (vsc_s + 4) & (0x3flu);
+    uatc            =   (idx_s << 0) |
+                        (vsc_s << 8) |
+                        (top_s << 16)|
+                        (20 << 24);
+}
+
+size_class_t size_class[NUM_SIZE_CLASSES];
+
+void init_size_classes (void) {
+
+    uint64_t idx_s  = (21) & (0x3flu);
+    uint64_t vsc_s  = (idx_s + (uint64_t)(clog2(MAX_NODES_IN_FREE_LIST))) & (0x3flu);
+    uint64_t top_s  = (vsc_s + 4) & (0x3flu);
+
+    printf("idx_s: %ld\tvsc_s %ld\ttops: %ld\tMAX_NODES_IN_FREE_LIST: %ld\n", idx_s, vsc_s, top_s, MAX_NODES_IN_FREE_LIST);
+
+    printf("Starting SC init\n");
+    for(uint64_t i = 0; i < NUM_SIZE_CLASSES; i++){
+        size_class[i].size = (SMALLEST_SIZE_CLASS << i);
+        size_class[i].head_index = 0;
+
+        for(uint64_t j = 0; j < MAX_NODES_IN_FREE_LIST; j++){
+            size_class[i].free_list[j].size =   (SMALLEST_SIZE_CLASS << i);
+            size_class[i].free_list[j].ptr  =   NULL;
+            size_class[i].free_list[j].next_node_index  =   j == (MAX_NODES_IN_FREE_LIST - 1) ? (uint64_t)(-1) : (j + 1);
+        }
+
+        uint64_t entries_in_SC = ( MAX_NODES_IN_FREE_LIST >> i );
+
+        uint64_t vsc   = i; // i is the size class
+        uint64_t number_of_indices  =   (1 << (vsc_s - idx_s - vsc));
+
+        // printf("Number of Indices: %d\n", number_of_indices);   
+        // printf("Number of Entries: %d\n", entries_in_SC);
+
+        for(uint64_t j = 0; j < (entries_in_SC / number_of_indices); j++){ // top
+            for(uint64_t k = 0; k < (number_of_indices); k++){ // idx
+                uint64_t addr = BASE_USABLE_MEMORY;
+                addr |= ( k << (idx_s + vsc) );
+                addr |= vsc << vsc_s;
+                addr |= j << top_s;
+
+                if((void *)addr == uatp){
+                    size_class[i].head_index   =   1;
+                    continue;
+                }
+
+                size_class[i].free_list[j * number_of_indices + k].ptr  = (void * ) addr;
+
+                printf("[SC %ld]\tVMA#%ld\t%p\n", i, j * number_of_indices + k, size_class[i].free_list[j * number_of_indices + k].ptr);
+            }
+        }
+    }
+    printf("Finishing SC init\n");
+}
+
+void * get_vma_from_freelist(uint64_t size) {
+    void * ptr = NULL;
+
+    uint64_t size_class_index = (uint64_t)flog2(size >> (flog2(SMALLEST_SIZE_CLASS)));
+    printf("[get_vma_from_freelist] size_class_index: %d\n", size_class_index);
+
+    // Find the head index of the free list
+    int size_class_head = size_class[size_class_index].head_index;
+    if(size_class_head == -1){  // Size class is empty and allocation is not possible
+        return NULL;
+    }
+
+    // Get the address pointer to the VMA that's at the head of the free list
+    ptr = size_class[size_class_index].free_list[size_class_head].ptr;
+
+    // Pop the head of the free list
+    size_class[size_class_index].head_index =   size_class[size_class_index].free_list[size_class_head].next_node_index;
+
+    return ptr;
+}
+
+int get_freelist_tail_index(int size_class_index){
+    int tail_index = size_class[size_class_index].head_index;
+
+    while(size_class[size_class_index].free_list[tail_index].next_node_index != (uint64_t)(-1)){
+        tail_index = size_class[size_class_index].free_list[tail_index].next_node_index;
+    }
+
+    return tail_index;
+}
+
+int get_node_index_by_ptr(void * ptr, int size_class_index){
+    int node_index = -1;
+
+    for(uint64_t i = 0ul; i < MAX_NODES_IN_FREE_LIST; i++){
+        if(size_class[size_class_index].free_list[i].ptr == ptr){
+            node_index = i;
+            break;
+        }
+    }
+
+    return node_index;
+}
+
+void insert_vma_into_freelist(void * ptr) {
+    uint64_t idx_s  = (21) & (0x3flu);
+    uint64_t vsc_s  = (idx_s + (uint64_t)(clog2(MAX_NODES_IN_FREE_LIST))) & (0x3flu);
+    uint64_t top_s  = (vsc_s + 4) & (0x3flu);
+
+    uint64_t vsc   = (((uint64_t)ptr) & ((1lu << top_s) - 1lu)) >> vsc_s;
+
+    int tail_index = get_freelist_tail_index(vsc);
+
+    int node_index = get_node_index_by_ptr(ptr, vsc);
+    size_class[vsc].free_list[tail_index].next_node_index = node_index;
+    size_class[vsc].free_list[node_index].next_node_index = -1;
+}
+
+
+void * mg_mmap(void * addr, size_t length, int prot, int flags, int fd, off_t offset){
+
+  printf("[mg_mmap] addr: %llx\tlength: %llx\n", addr, length);
+
+    void * ptr = get_vma_from_freelist(length);
+
+  printf("[mg_mmap] ptr: %llx\n", ptr);
+
+    // Changing the translation table entry for ptr
+    struct vma_t *vma = trans((uint64_t)ptr);
+    vma->bound = (((uint64_t)ptr) >> 12);
+    vma->offs  =  offs;
+    vma->attr  = 0xdf;
+    vma->ptr   = 0x0;
+
+    vma->tab[0].sdid = 0;
+    vma->tab[0].attr = (prot << 1) | 1;     // Validating the VMA and giving it permissions
+                                            // the LSB bit in RISCV is valid bit so, it needs to be set to 1
+
+    return ptr;
+}
+
+void mg_unmap(void * ptr, size_t length){
+    insert_vma_into_freelist(ptr);
+
+    struct vma_t *vma = trans((uint64_t)ptr);
+    vma->bound = (((uint64_t)ptr) >> 12);
+    vma->offs  =  offs;
+    vma->attr  = 0xdf;
+    vma->ptr   = 0x0;
+
+    vma->tab[0].sdid = 0;
+    vma->tab[0].attr = 0x0;  // Invalidating the VMA;
+
+}
+
+
 
 //---------------------------------------------
 // init
@@ -143,8 +368,10 @@ void _mi_prim_mem_init( mi_os_mem_config_t* config ) {
 //---------------------------------------------
 
 int _mi_prim_free(void* addr, size_t size ) {
-  bool err = (munmap(addr, size) == -1);
-  return (err ? errno : 0);
+  // bool err = (mg_unmap(addr, size) == -1);
+  // return (err ? errno : 0);
+  mg_unmap(addr, size);
+  return (0);
 }
 
 
@@ -188,7 +415,7 @@ static void* unix_mmap_prim(void* addr, size_t size, size_t try_alignment, int p
   if (addr == NULL) {
     void* hint = _mi_os_get_aligned_hint(try_alignment, size);
     if (hint != NULL) {
-      p = mmap(hint, size, protect_flags, flags, fd, 0);
+      p = mg_mmap(hint, size, protect_flags, flags, fd, 0);
       if (p==MAP_FAILED || !_mi_is_aligned(p,try_alignment)) { 
         #if MI_TRACK_ENABLED  // asan sometimes does not instrument errno correctly?
         int err = 0;
@@ -197,13 +424,14 @@ static void* unix_mmap_prim(void* addr, size_t size, size_t try_alignment, int p
         #endif
         _mi_warning_message("unable to directly request hinted aligned OS memory (error: %d (0x%x), size: 0x%zx bytes, alignment: 0x%zx, hint address: %p)\n", err, err, size, try_alignment, hint);
       }
+      printf("[unix_mmap_prim] p: %llx\n", p);
       if (p!=MAP_FAILED) return p;
       // fall back to regular mmap      
     }
   }
   #endif
   // regular mmap
-  p = mmap(addr, size, protect_flags, flags, fd, 0);
+  p = mg_mmap(addr, size, protect_flags, flags, fd, 0);
   if (p!=MAP_FAILED) return p;
   // failed to allocate
   return NULL;
@@ -331,6 +559,7 @@ int _mi_prim_alloc(size_t size, size_t try_alignment, bool commit, bool allow_la
   *is_zero = true;
   int protect_flags = (commit ? (PROT_WRITE | PROT_READ) : PROT_NONE);  
   *addr = unix_mmap(NULL, size, try_alignment, protect_flags, false, allow_large, is_large);
+  printf("[_mi_prim_alloc] addr: %llx\n", *addr);
   return (*addr != NULL ? 0 : errno);
 }
 

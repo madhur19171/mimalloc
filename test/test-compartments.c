@@ -72,11 +72,13 @@ int main(void) {
 
     compartment_t compartments[NUM_COMPARTMENTS];
 
+    printf("Compartment Creation Start\n");
     // Creating half of the compartments right now
     // Rest half will be created later
     for(int i = 0; i < NUM_COMPARTMENTS / 2; i++) {
       compartments[i].compartment_id = create_compartment();
     }
+    printf("Compartment Creation End\n");
 
     // Round 1
     printf("Round 1\n");

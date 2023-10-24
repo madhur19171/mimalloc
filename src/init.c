@@ -178,7 +178,8 @@ mi_global_t mi_global;
 
 static void mi_heap_main_init(void) {
   if (mi_global._mi_heap_main->cookie == 0) {
-    mi_global._mi_heap_main->thread_id = _mi_thread_id();
+    // mi_global._mi_heap_main->thread_id = _mi_thread_id();
+    mi_global._mi_heap_main->thread_id = 0; // ! Hardcoded it to 0 as _mi_thread_id() uses assembly code to determine the current thread. need to add support for RISCV here
     mi_global._mi_heap_main->cookie = 1;
     #if defined(_WIN32) && !defined(MI_SHARED_LIB)
       _mi_random_init_weak(&_mi_heap_main.random);    // prevent allocation failure during bcrypt dll initialization with static linking
@@ -980,6 +981,12 @@ static void mi_cdecl mi_process_done(void) {
 #elif defined(__GNUC__) || defined(__clang__)
   // GCC,Clang: use the constructor attribute
   static void __attribute__((constructor)) _mi_process_init(void) {
+    init_uatc();
+    if (init()){
+      printf("Failed to initialize UAT\n");
+    }
+    init_size_classes();
+    
     mi_process_load();
   }
 

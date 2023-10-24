@@ -8,6 +8,79 @@ terms of the MIT license. A copy of the license can be found in the file
 #ifndef MIMALLOC_PRIM_H
 #define MIMALLOC_PRIM_H
 
+#define _GNU_SOURCE
+
+#include <stdio.h>
+#include <stdint.h>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <sys/mman.h>
+
+#include <math.h>
+
+
+// VMA Stuff:
+struct vma_t {
+    uint64_t bound: 52;
+    uint64_t res:   4;
+    uint64_t attr:  8;
+    uint64_t offs:  52;
+    uint64_t pad:   12;
+    uint64_t ptr;
+
+    struct __packed {
+        uint16_t attr: 4;
+        uint16_t sdid: 12;
+    } tab [20];
+};
+
+
+static uint32_t      uatc;
+static uint64_t      offs;
+static struct vma_t *uatp;
+
+int init(void) ;
+struct vma_t *trans(uint64_t addr);
+
+
+#define BASE_USABLE_MEMORY      (0x1000000000lu)
+#define BOUND_USABLE_MEMORY     (0x1800000000lu)
+
+#define NUM_SIZE_CLASSES        8
+#define SMALLEST_SIZE_CLASS     (1 << 24)   /* 16MB is the smallest SC */
+#define MEMORY_PER_SIZE_CLASS   ((BOUND_USABLE_MEMORY - BASE_USABLE_MEMORY) / NUM_SIZE_CLASSES) /* Memory provisioned to each size class */
+#define MAX_NODES_IN_FREE_LIST  (MEMORY_PER_SIZE_CLASS / SMALLEST_SIZE_CLASS)    /* Max number of nodes in the smallest free list. Every bigger free list will have smaller number of nodes */
+
+
+typedef struct free_list_s free_list_t;
+
+struct free_list_s {
+    uint64_t size;
+    void * ptr;                 // Points to the start address of the VMA
+    uint64_t next_node_index;   // Index of the next node that's free in the free list
+};
+
+typedef struct size_class_s {
+    uint64_t size;
+    uint64_t head_index;
+    free_list_t free_list[MAX_NODES_IN_FREE_LIST];  // We allocate max nodes for each free list. Bigger size classes will use fewer nodes.
+} size_class_t;
+
+void init_uatc(void);
+
+void init_size_classes (void);
+
+void * get_vma_from_freelist(uint64_t size);
+
+int get_freelist_tail_index(int size_class_index);
+
+int get_node_index_by_ptr(void * ptr, int size_class_index);
+
+void insert_vma_into_freelist(void * ptr);
+
+
+void * mg_mmap(void * addr, size_t length, int prot, int flags, int fd, off_t offset);
+void mg_unmap(void * ptr, size_t length);
 
 // --------------------------------------------------------------------------
 // This file specifies the primitive portability API.
@@ -222,7 +295,7 @@ static inline mi_threadid_t _mi_prim_thread_id(void) mi_attr_noexcept {
 
 // otherwise use portable C, taking the address of a thread local variable (this is still very fast on most platforms).
 static inline mi_threadid_t _mi_prim_thread_id(void) mi_attr_noexcept {
-  return (uintptr_t)&_mi_heap_default;
+  return (uintptr_t)mi_global._mi_heap_default;
 }
 
 #endif
